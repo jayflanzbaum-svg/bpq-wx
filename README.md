@@ -68,10 +68,14 @@ RAIN: Little or no rain expected.
    In the **APPLICATIONS** section (adjust the application number, HOST
    index, and your callsign/alias):
    ```
-   APPLICATION 6,WX,C 7 HOST 0 S,MYCALL-15,NODEWX,255
+   APPLICATION 6,WX,C 7 HOST 0 S TRANS,MYCALL-15,NODEWX,255
    ```
-   `C 7` is your Telnet port number; `HOST 0` is the CMDPORT position; the
-   `S` flag makes BPQ send the connecting user's callsign to the app.
+   `C 7` is your Telnet port number; `HOST 0` is the CMDPORT position;
+   `S` returns the user to the node prompt when the app exits; **`TRANS`
+   is required for the in-session YAPP downloads** — it puts the connection
+   in binary (FBB) mode so the file transfer bytes pass through untouched
+   (BPQ32 6.0.20.1 or later). BPQ sends the connecting user's callsign to
+   the app automatically.
 5. Restart BPQ32, start the app (a startup batch file or a Windows Terminal
    tab works well), and type `WX` at your node prompt.
 

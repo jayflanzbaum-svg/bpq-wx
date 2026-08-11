@@ -110,6 +110,9 @@ def nws_headers() -> dict:
 # -----------------------------
 
 def sanitize_for_bbs(s: str) -> str:
+    """Normalize to plain ASCII with CR line endings (BPQ native convention).
+    The app runs on a TRANS (binary) HOST connection, so the node passes our
+    bytes through unmodified - we must emit CR, not CRLF, ourselves."""
     if not s:
         return s
     s = s.replace("\r\n", "\n").replace("\r", "\n")
@@ -118,7 +121,7 @@ def sanitize_for_bbs(s: str) -> str:
            .replace("\u2014", "-").replace("\u2013", "-")
            .replace("\u2026", "..."))
     s = re.sub(r"[^\x09\x0a\x20-\x7e]", "", s)
-    return s.replace("\n", "\r\n")
+    return s.replace("\n", "\r")
 
 
 # -----------------------------
@@ -394,7 +397,7 @@ def write_report_file(output_dir: Path, callsign: str, zipcode: str, report: str
         f"\n{banner}\n"
         "Generated on demand by the WX app.\n"
     )
-    (output_dir / name).write_text(sanitize_for_bbs(body).replace("\r\n", "\n"), encoding="utf-8")
+    (output_dir / name).write_text(sanitize_for_bbs(body).replace("\r", "\n"), encoding="utf-8")
     return name
 
 
