@@ -391,7 +391,9 @@ def prune_old_files(output_dir: Path, max_age_hours: int) -> None:
 
 def write_report_file(output_dir: Path, callsign: str, zipcode: str, report: str,
                       banner: str) -> str:
-    date_s = dt.datetime.now().strftime("%m-%d-%Y")
+    # Time in the name keeps each transfer unique - YAPP receivers (QtTermTCP)
+    # refuse a file that already exists in their receive folder.
+    date_s = dt.datetime.now().strftime("%m-%d-%Y_%H%M")
     name = f"WX_{base_call(callsign)}_{zipcode}_{date_s}.txt"
     body = report + (
         f"\n{banner}\n"
@@ -437,7 +439,7 @@ class GribManager:
                 return None, "A GRIB build is already running for you. Type STATUS to check it."
             if sum(1 for j in self.jobs.values() if j.status == "RUNNING") >= int(self.cfg["max_concurrent_jobs"]):
                 return None, "GRIB builder is busy. Try again in a few minutes."
-            date_s = dt.datetime.now().strftime("%m-%d-%Y")
+            date_s = dt.datetime.now().strftime("%m-%d-%Y_%H%M")
             job = GribJob(f"WX_{cs}_{zipcode}_{date_s}.grib2.gz")
             job.hours_total = int(self.cfg["forecast_hours"])
             self.jobs[cs] = job
@@ -578,7 +580,12 @@ async def yapp_send_file(reader: asyncio.StreamReader, writer: asyncio.StreamWri
     ack_eof_timeout = max(180.0, len(data) / 15.0)
 
     try:
-        # SI -> expect RR (ACK 01)
+        # SI -> expect RR (ACK 01).
+        # QtTermTCP only auto-detects YAPP when ENQ 01 arrives as its own
+        # 2-byte read, so let any announcement text drain through the node
+        # first and send the SI in an isolated packet.
+        await writer.drain()
+        await asyncio.sleep(2.0)
         writer.write(bytes([Y_ENQ, 0x01]))
         await writer.drain()
         kind, val, _ = await _yapp_wait(reader, 60)
@@ -635,10 +642,19 @@ async def yapp_send_file(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         return f"Transfer complete ({mode}): {name} ({len(data)} bytes)\r\n"
 
     except YappAbort as e:
-        return f"YAPP: {e} File is still on the BBS as {name}\r\n"
+        return (f"YAPP: {e}\r\n"
+                f"(If your terminal said the file already exists, delete it from your\r\n"
+                f"YAPP receive folder and try again.)\r\n" + _bbs_fallback(name))
     except asyncio.TimeoutError:
-        return (f"YAPP: no response from your terminal - it may not support YAPP.\r\n"
-                f"The file is on the BBS Files area as {name}\r\n")
+        return ("YAPP: no response from your terminal - it may not support YAPP.\r\n"
+                + _bbs_fallback(name))
+
+
+def _bbs_fallback(name: str) -> str:
+    return (f"To download it through the BBS instead, type these commands:\r\n"
+            f"  QUIT\r\n"
+            f"  BBS\r\n"
+            f"  YAPP {name}\r\n")
 
 
 # -----------------------------
