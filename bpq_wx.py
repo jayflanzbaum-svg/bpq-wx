@@ -542,6 +542,10 @@ Y_ENQ, Y_ACK, Y_NAK, Y_CAN = 0x05, 0x06, 0x15, 0x18
 
 YAPP_BLOCK = 128
 
+# Gap between YAPP frames so each is flushed through the node as its own
+# packet (keeps per-packet YAPP parsers in sync).
+FRAME_GAP = 0.05
+
 
 class YappAbort(Exception):
     pass
@@ -595,6 +599,7 @@ async def yapp_send_file(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             raise YappAbort("Unexpected response starting YAPP.")
 
         # Header -> expect RF (ACK 02) or YappC RT (ACK ACK)
+        await asyncio.sleep(FRAME_GAP)
         hdr = name.encode("ascii", "ignore") + b"\x00" + str(len(data)).encode("ascii") + b"\x00"
         writer.write(bytes([Y_SOH, len(hdr)]) + hdr)
         await writer.drain()
@@ -608,7 +613,11 @@ async def yapp_send_file(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         else:
             raise YappAbort("Unexpected response to YAPP header.")
 
-        # Data frames
+        # Data frames. Pace each frame into its own packet: the node repacks
+        # a continuous stream into paclen-size chunks, splitting YAPP frames
+        # across packets, and per-packet parsers (e.g. Packet Commander)
+        # lose sync on a frame that starts mid-packet.
+        await asyncio.sleep(FRAME_GAP)
         sent = 0
         while sent < len(data):
             chunk = data[sent:sent + YAPP_BLOCK]
@@ -617,13 +626,13 @@ async def yapp_send_file(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 pkt += bytes([sum(chunk) & 0xFF])
             writer.write(pkt)
             sent += len(chunk)
-            if sent % (YAPP_BLOCK * 8) == 0:
-                await writer.drain()
-        await writer.drain()
+            await writer.drain()
+            await asyncio.sleep(FRAME_GAP)
 
         # EOF -> expect AF (ACK 03)
         writer.write(bytes([Y_ETX, 0x01]))
         await writer.drain()
+        await asyncio.sleep(FRAME_GAP)
         kind, val, _ = await _yapp_wait(reader, ack_eof_timeout)
         if kind in ("NAK", "CAN"):
             raise YappAbort("Transfer cancelled by your terminal.")
