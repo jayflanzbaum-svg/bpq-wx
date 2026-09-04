@@ -17,6 +17,8 @@ Commands:
   ZIP <#####>    -> set zip code for this user
   48HR           -> 48 hour outlook
   ALERTS         -> active NWS alerts for your area
+  YAPP           -> send the report to your PC by YAPP
+  YAPP GRIB      -> send the built GRIB file by YAPP
   FILE           -> write report to BBS Files folder for YAPP download
   GRIB           -> build zip-area GRIB file (background, ~1 minute)
   STATUS         -> check GRIB build progress
@@ -31,6 +33,7 @@ import datetime as dt
 import gzip
 import json
 import re
+import textwrap
 import threading
 import time
 from collections import Counter
@@ -47,6 +50,9 @@ DEFAULT_CONFIG = {
     "bpq_app": {"listen_host": "127.0.0.1", "listen_port": 63051},
     "storage": {"user_db_file": "wx_users.json", "zip_db_file": "us_zips.csv"},
     "output_dir": "./files",
+    # Terminal width to fold output at, and whether the menu follows every
+    # reply. See BPQ-Node/NODE-APP-STYLE.md; width 0 disables folding.
+    "display": {"width": 42, "menu_every_reply": False},
     "banner": "BPQ WX SERVICE",
     "file_max_age_hours": 24,
     "forecast_cache_minutes": 10,
@@ -80,22 +86,33 @@ GRIB_LEVELS = {
     "lev_mean_sea_level": "on",
 }
 
-MENU_LINE = "<ENTER> | ZIP <#####> | 48HR | ALERTS | DL | GRIB | DL GRIB | FILE | STATUS | HELP | QUIT\r\n"
+# Grouped one purpose per line, <ENTER> first and HELP | QUIT last, inside 42
+# columns - see BPQ-Node/NODE-APP-STYLE.md. This was one 89-column line, which
+# folded into four ragged ones on a phone.
+MENU_LINE = ("<ENTER> | ZIP <#####> | 48HR | ALERTS\r\n"
+             "YAPP | FILE | GRIB | YAPP GRIB\r\n"
+             "STATUS | HELP | QUIT\r\n")
 
+# Two columns inside 42: a 13-wide command field, then the gloss.
 HELP_TEXT = (
     "Commands:\r\n"
-    "  (Enter) / WX   -> refresh 24hr report\r\n"
-    "  ZIP <#####>    -> set your zip code (e.g. ZIP 33445)\r\n"
-    "  48HR           -> 48 hour outlook\r\n"
-    "  ALERTS         -> active NWS alerts for your area\r\n"
-    "  DL             -> download report .txt right now via YAPP\r\n"
-    "  GRIB           -> build GRIB file for your area (takes ~1 min)\r\n"
-    "  DL GRIB        -> download the built GRIB file via YAPP\r\n"
-    "  FILE           -> save report as .txt on the BBS instead\r\n"
-    "  STATUS         -> check GRIB build progress\r\n"
-    "  HELP           -> show commands\r\n"
-    "  Q / BYE / EXIT / NODE -> exit\r\n"
+    "  (Enter)      refresh 24hr report\r\n"
+    "  WX           same thing\r\n"
+    "  ZIP <#####>  set location, ZIP 33445\r\n"
+    "  48HR         48 hour outlook\r\n"
+    "  ALERTS       active NWS alerts\r\n"
+    "  YAPP         send report to your PC\r\n"
+    "  FILE         save report on the BBS\r\n"
+    "  GRIB         build a GRIB (~1 min)\r\n"
+    "  YAPP GRIB    send the GRIB you built\r\n"
+    "  STATUS       GRIB build progress\r\n"
+    "  HELP         show commands\r\n"
+    "  Q / BYE / NODE  exit\r\n"
 )
+
+# House vocabulary, identical in all four apps.
+EXIT_WORDS = ("Q", "QUIT", "EXIT", "BYE", "NODE")
+HELP_WORDS = ("HELP", "?")
 
 
 def nws_headers() -> dict:
@@ -322,29 +339,33 @@ def build_report(place: str, state: str, zipcode: str, periods: List[dict], hour
     now = dt.datetime.now()
     lines = [
         f"WX REPORT  {place} {state} {zipcode}",
-        f"Issued: {now.strftime('%m-%d-%Y %I:%M %p')}  Source: NWS Hourly",
+        # Two lines: together they were 48 columns and folded "NWS Hourly"
+        # onto a line of its own anyway.
+        f"Issued: {now.strftime('%m-%d-%Y %I:%M %p')}",
+        "Source: NWS hourly forecast",
         "",
     ]
 
-    s1 = summarize_period_block(periods[:24])
-    lines += [
-        "0-24 HOURS",
-        f"WX: {s1['wx']}",
-        f"TEMP: {s1['temp']}",
-        f"WIND: {s1['wind']}",
-        f"RAIN: {s1['rain']}",
-    ]
+    # A fixed 6-column label field, so the four values start in the same
+    # place and a folded one indents under its own label rather than under
+    # the next line's label. See BPQ-Node/NODE-APP-STYLE.md.
+    def block(title: str, s: dict) -> List[str]:
+        # Folded here rather than in send(), because a value that runs long
+        # must hang under the value column. Left to the generic fold it came
+        # back at the label's own indent and read as another label row.
+        out = [title]
+        for label in ("WX", "TEMP", "WIND", "RAIN"):
+            out += textwrap.wrap(f"{label:<6}{s[label.lower()]}",
+                                 width=max(24, OUT_WIDTH),
+                                 initial_indent="  ",
+                                 subsequent_indent=" " * 8,
+                                 break_long_words=True,
+                                 break_on_hyphens=False)
+        return out
 
+    lines += block("0-24 HOURS", summarize_period_block(periods[:24]))
     if hours48:
-        s2 = summarize_period_block(periods[24:48])
-        lines += [
-            "",
-            "24-48 HOURS",
-            f"WX: {s2['wx']}",
-            f"TEMP: {s2['temp']}",
-            f"WIND: {s2['wind']}",
-            f"RAIN: {s2['rain']}",
-        ]
+        lines += [""] + block("24-48 HOURS", summarize_period_block(periods[24:48]))
 
     return "\n".join(lines) + "\n"
 
@@ -361,7 +382,9 @@ def build_alerts_text(place: str, state: str, features: List[dict]) -> str:
         headline = (props.get("headline") or "").strip()
         lines.append(f"* {event} ({severity})")
         if headline:
-            lines.append(f"  {headline[:150]}")
+            # 150 characters folded to four lines under every alert; the full
+            # text is in the .txt that YAPP and FILE produce.
+            lines.append(f"  {headline[:110]}")
         if ends:
             lines.append(f"  Until: {ends[:16].replace('T', ' ')}")
     if len(features) > 5:
@@ -389,6 +412,18 @@ def prune_old_files(output_dir: Path, max_age_hours: int) -> None:
             print(f"[PRUNE] Could not delete {f}: {e}")
 
 
+def grib_ready(ctx, callsign: str) -> bool:
+    """True when this caller has a built GRIB sitting on disk.
+
+    Decides whether a bare YAPP has anything to ask about: with no GRIB there
+    is only one sendable thing and asking would be a wasted round trip on a
+    slow link.
+    """
+    job = ctx.grib.get(callsign)
+    return bool(job and job.status == "DONE"
+                and (ctx.output_dir / job.filename).exists())
+
+
 def write_report_file(output_dir: Path, callsign: str, zipcode: str, report: str,
                       banner: str) -> str:
     # Time in the name keeps each transfer unique - YAPP receivers (QtTermTCP)
@@ -399,7 +434,9 @@ def write_report_file(output_dir: Path, callsign: str, zipcode: str, report: str
         f"\n{banner}\n"
         "Generated on demand by the WX app.\n"
     )
-    (output_dir / name).write_text(sanitize_for_bbs(body).replace("\r", "\n"), encoding="utf-8")
+    dest = output_dir / name
+    dest.write_text(sanitize_for_bbs(body).replace("\r", "\n"), encoding="utf-8")
+    print(f"[FILE] Wrote {dest.resolve()}")
     return name
 
 
@@ -676,15 +713,69 @@ def load_config() -> Dict:
         cfg_path.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
         print(f"[CFG] Created {CONFIG_FILE}.")
         return DEFAULT_CONFIG
-    return json.loads(cfg_path.read_text(encoding="utf-8"))
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    # A config written before display settings existed simply has none, so
+    # fill them from the defaults rather than making the sysop edit the file.
+    for k, v in DEFAULT_CONFIG.items():
+        if k not in cfg:
+            cfg[k] = v
+        elif isinstance(v, dict) and isinstance(cfg.get(k), dict):
+            for kk, vv in v.items():
+                cfg[k].setdefault(kk, vv)
+    return cfg
 
 
 # -----------------------------
 # BPQ TCP server / session handler
 # -----------------------------
 
+OUT_WIDTH = 42
+MENU_EVERY = False
+
+
+def wrap_out(text: str, width: int) -> str:
+    """Fold over-long lines at word boundaries for a narrow terminal.
+
+    A phone client is about 43 columns, so anything wider folds mid-word.
+    Lines already inside the width pass through untouched, which is what keeps
+    fixed-format blocks in column. See BPQ-Node/NODE-APP-STYLE.md.
+    """
+    if width <= 0 or not text:
+        return text
+    out = []
+    for raw in text.replace("\r\n", "\n").splitlines(keepends=True):
+        end = "\n" if raw.endswith("\n") else ""
+        body = raw[:-1] if end else raw
+        if len(body) <= width:
+            out.append(body + end)
+            continue
+        lead = body[:len(body) - len(body.lstrip(" "))]
+        folded = textwrap.wrap(body.strip(), width=width,
+                               initial_indent=lead,
+                               subsequent_indent=lead or "  ",
+                               break_long_words=True, break_on_hyphens=False)
+        out.append("\n".join(folded or [body]) + end)
+    return "".join(out)
+
+
+def apply_display_config(cfg: Dict) -> None:
+    """Adopt display.width / display.menu_every_reply from config.
+
+    A typo in either must not stop the node coming up, so both fall back.
+    """
+    global OUT_WIDTH, MENU_EVERY
+    d = (cfg.get("display") or {}) if isinstance(cfg, dict) else {}
+    try:
+        OUT_WIDTH = int(d.get("width", OUT_WIDTH))
+    except (TypeError, ValueError):
+        print(f"[CFG] display.width unreadable - keeping {OUT_WIDTH}.")
+    MENU_EVERY = bool(d.get("menu_every_reply", MENU_EVERY))
+
+
 def send(writer: asyncio.StreamWriter, text: str) -> None:
-    writer.write(sanitize_for_bbs(text).encode("utf-8", "ignore"))
+    # Fold first: sanitize_for_bbs turns newlines into the bare CR a TRANS
+    # connection wants, which is no longer a line break to fold on.
+    writer.write(sanitize_for_bbs(wrap_out(text, OUT_WIDTH)).encode("utf-8", "ignore"))
 
 
 async def read_line(reader: asyncio.StreamReader, timeout: Optional[float] = None) -> Optional[str]:
@@ -759,13 +850,22 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         send(writer, "\r\n" + MENU_LINE + "> ")
         await writer.drain()
 
+        show_menu = False
+        # True while a bare YAPP is waiting to be told TXT or GRIB.
+        yapp_pending = False
         while True:
             line = await read_line(reader)
             if line is None:
                 return
+            # A blank line under the command the operator just typed, so the
+            # answer reads as a separate block. See NODE-APP-STYLE.md.
+            send(writer, "\r\n")
             up = line.upper()
+            # A pick is good for exactly the next command, so copy it and
+            # clear it before dispatching. See NODE-APP-STYLE.md.
+            was_pending, yapp_pending = yapp_pending, False
 
-            if up in ("Q", "QUIT", "EXIT", "BYE", "NODE"):
+            if up in EXIT_WORDS:
                 send(writer, "73!\r\n")
                 await writer.drain()
                 return
@@ -795,7 +895,19 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     except Exception as e:
                         send(writer, f"Alerts fetch failed: {str(e)[:100]}\r\n")
 
-            elif up == "DL" or up == "DL TXT":
+            elif up in ("YAPP", "DL") and grib_ready(ctx, callsign):
+                # Two sendable things, so ask rather than guess - the same
+                # numbered-pick idiom the other apps use. Only reached when a
+                # GRIB is actually ready; otherwise the report goes straight
+                # out below and nobody is asked anything.
+                send(writer, "Send what?\r\n"
+                             " 1 TXT   this weather report\r\n"
+                             " 2 GRIB  the GRIB file you built\r\n"
+                             "Pick a number: YAPP 1, or just 1.\r\n")
+                yapp_pending = True
+
+            elif (up in ("YAPP", "DL", "YAPP TXT", "DL TXT")
+                  or (up == "1" and was_pending)):
                 report = await get_report_text(ctx, zipcode, hours48=True)
                 if report.startswith(("Unknown", "NWS")):
                     send(writer, report)
@@ -803,24 +915,26 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     name = await asyncio.to_thread(write_report_file, ctx.output_dir,
                                                    callsign, zipcode, report, ctx.banner)
                     send(writer,
-                         f"Starting YAPP transfer of {name}.\r\n"
-                         f"If your terminal supports YAPP it will begin now...\r\n")
+                         f"Sending {name}.\r\n"
+                         f"Arm your terminal's YAPP receive now...\r\n")
                     await writer.drain()
                     result = await yapp_send_file(reader, writer, ctx.output_dir / name)
                     send(writer, result)
 
-            elif up == "DL GRIB":
+            elif (up in ("YAPP GRIB", "DL GRIB")
+                  or (up == "2" and was_pending)):
                 job = ctx.grib.get(callsign)
                 if job is None:
-                    send(writer, "No GRIB built yet. Type GRIB first, then DL GRIB when done.\r\n")
+                    send(writer, "No GRIB built yet. Type GRIB first, then "
+                                 "YAPP GRIB when it is done.\r\n")
                 elif job.status == "RUNNING":
                     send(writer, f"GRIB still building: hour {job.hours_done} of {job.hours_total}. Try again shortly.\r\n")
                 elif job.status != "DONE" or not (ctx.output_dir / job.filename).exists():
                     send(writer, "GRIB build failed or file expired. Type GRIB to rebuild.\r\n")
                 else:
                     send(writer,
-                         f"Starting YAPP transfer of {job.filename}.\r\n"
-                         f"If your terminal supports YAPP it will begin now...\r\n")
+                         f"Sending {job.filename}.\r\n"
+                         f"Arm your terminal's YAPP receive now...\r\n")
                     await writer.drain()
                     result = await yapp_send_file(reader, writer, ctx.output_dir / job.filename)
                     send(writer, result)
@@ -863,13 +977,21 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 else:
                     send(writer, f"GRIB build FAILED: {job.error}\r\n")
 
-            elif up == "HELP" or up == "?":
+            elif up in HELP_WORDS:
                 send(writer, HELP_TEXT)
+                show_menu = True
 
             else:
-                send(writer, "Unknown command. Type HELP for commands.\r\n")
+                # Same wording as the other apps, quoting what was not
+                # understood rather than just saying "Unknown command".
+                send(writer, f"'{line.strip()[:20]}' is not a command.\r\n")
+                show_menu = True
 
-            send(writer, "\r\n" + MENU_LINE + "> ")
+            # The menu on demand, not after every reply: three commands cost
+            # more lines of menu than of answer. See NODE-APP-STYLE.md.
+            menu = MENU_LINE if (MENU_EVERY or show_menu) else ""
+            show_menu = False
+            send(writer, "\r\n" + menu + "> ")
             await writer.drain()
 
     except (ConnectionResetError, OSError):
@@ -883,8 +1005,11 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
 async def run_server() -> None:
     cfg = load_config()
+    apply_display_config(cfg)
     ctx = AppContext(cfg)
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[CFG] Files (FILE/GRIB) will be written to: {ctx.output_dir.resolve()}")
+    print("[CFG] This must match your BBS Files folder (see output_dir in wx_config.json).")
 
     host = cfg["bpq_app"]["listen_host"]
     port = int(cfg["bpq_app"]["listen_port"])

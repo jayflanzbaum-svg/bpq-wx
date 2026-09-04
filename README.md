@@ -45,19 +45,41 @@ RAIN: Little or no rain expected.
 - A BPQ32 node with a Telnet port
 - US-only: forecasts come from the US National Weather Service
 
-## Install
+## Install (Windows, no Python experience needed)
 
-1. Clone this repo somewhere on the node PC.
-2. Run it once to generate `wx_config.json`:
+You do not need to know how to program to run this - just follow these steps
+on the BPQ32 node PC.
+
+1. **Install Python.** Go to
+   [python.org/downloads](https://www.python.org/downloads/) and download the
+   latest Python 3 installer. Run it, and on the very first screen **check
+   the box at the bottom that says "Add python.exe to PATH"** before clicking
+   Install - this is the step everyone misses, and without it Windows won't
+   know what `python` means.
+2. **Download this app.** On this page, click the green **Code** button →
+   **Download ZIP**. Unzip it somewhere easy to find, e.g. `C:\bpq-wx`.
+   (If you're comfortable with git, `git clone` works too and makes updates a
+   one-line `git pull` later.)
+3. **Open a terminal in that folder.** In File Explorer, open the `bpq-wx`
+   folder, click in the empty address bar at the top, type `cmd`, and press
+   Enter. A black command-prompt window opens already sitting in that folder.
+4. **Install the one dependency this app needs:**
+   ```
+   pip install requests
+   ```
+5. **Run it once** to generate `wx_config.json`:
    ```
    python bpq_wx.py
    ```
-3. Edit `wx_config.json`:
+   Leave this window open for now - you'll see status messages print here
+   whenever the app is running, which is useful for troubleshooting. Press
+   `Ctrl+C` to stop it before continuing.
+6. **Edit `wx_config.json`** (right-click it → Open with → Notepad):
    - `output_dir` — point at your BBS files folder
      (e.g. `C:\Users\<you>\AppData\Roaming\BPQ32\BPQMailChat\Files`)
    - `banner` — the station banner printed at the bottom of saved reports
    - `listen_port` — must match the CMDPORT entry you add below (default 63051)
-4. Add the app to `BPQ32.cfg`:
+7. Add the app to `BPQ32.cfg`:
 
    In your **Telnet port** `CONFIG` block, add the listen port to `CMDPORT`
    (space-separated list; note its zero-based position — that's the HOST
@@ -76,8 +98,25 @@ RAIN: Little or no rain expected.
    in binary (FBB) mode so the file transfer bytes pass through untouched
    (BPQ32 6.0.20.1 or later). BPQ sends the connecting user's callsign to
    the app automatically.
-5. Restart BPQ32, start the app (a startup batch file or a Windows Terminal
-   tab works well), and type `WX` at your node prompt.
+8. Restart BPQ32, then start the app the same way as step 5 - open a command
+   prompt in the `bpq-wx` folder and run `python bpq_wx.py`. Leave that window
+   open; closing it stops the app. (Once this is working, you can put that
+   same command in a `.bat` file and double-click it instead of retyping it,
+   or add it to Windows startup.) Connect to your node and type `WX`.
+
+## Troubleshooting
+
+- **FILE (or GRIB) says it saved, but you can't find the file** — `output_dir`
+  in `wx_config.json` almost certainly isn't pointing at your actual BPQ32
+  Files folder. On every startup the app prints the exact folder it's writing
+  to, e.g.:
+  ```
+  [CFG] Files (FILE/GRIB) will be written to: C:\bpq-wx\files
+  [CFG] This must match your BBS Files folder (see output_dir in wx_config.json).
+  ```
+  Compare that path against your BBS Files folder (in BPQMailChat this is
+  usually `%APPDATA%\BPQ32\BPQMailChat\Files`). If they don't match, edit
+  `output_dir` in `wx_config.json` and restart the app.
 
 ## Zip code database
 
