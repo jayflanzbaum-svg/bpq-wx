@@ -49,6 +49,10 @@ import requests
 DEFAULT_CONFIG = {
     "bpq_app": {"listen_host": "127.0.0.1", "listen_port": 63051},
     "storage": {"user_db_file": "wx_users.json", "zip_db_file": "us_zips.csv"},
+    # Point output_dir at the BBS Files folder. In JSON a backslash is an
+    # escape character, so a Windows path needs them doubled - or just use
+    # forward slashes, which Windows accepts.
+    "_comment": "output_dir: use C:/like/this or C:\\like\\this - a single backslash is a JSON escape and will not load.",
     "output_dir": "./files",
     # Terminal width to fold output at, and whether the menu follows every
     # reply. See BPQ-Node/NODE-APP-STYLE.md; width 0 disables folding.
@@ -707,13 +711,60 @@ def _bbs_fallback(name: str) -> str:
 # Config load
 # -----------------------------
 
+BACKSLASH_HELP = (
+    '[CFG] In JSON a backslash starts an escape code, so a Windows path\n'
+    '[CFG] needs them doubled - or use forward slashes, which Windows takes:\n'
+    '[CFG]     "output_dir": "C:\\\\BPQ-WX\\\\files"\n'
+    '[CFG]     "output_dir": "C:/BPQ-WX/files"'
+)
+
+
+def _config_from_bad_json(raw: str, err: json.JSONDecodeError) -> Dict:
+    """Explain a broken config in one screen instead of a traceback.
+
+    Sysops edit this file in Notepad, so a stack trace out of the json module
+    is the least useful thing we could show them.
+    """
+    lines = raw.splitlines()
+    print(f"[CFG] {CONFIG_FILE} is not valid JSON: {err.msg}")
+    if 0 < err.lineno <= len(lines):
+        marker = f" line {err.lineno}: "
+        print(f"[CFG]{marker}{lines[err.lineno - 1]}")
+        print("[CFG]" + " " * (len(marker) + err.colno - 1) + "^")
+    msg = err.msg.lower()
+    if "escape" in msg or "control character" in msg:
+        print(BACKSLASH_HELP)
+    print(f"[CFG] Fix {CONFIG_FILE}, or delete it and restart to regenerate it.")
+    raise SystemExit(1)
+
+
+def _check_path_setting(cfg: Dict, key: str) -> None:
+    r"""Reject a path that single backslashes quietly turned into gibberish.
+
+    "C:\temp\files" is *valid* JSON - \t and \f are real escape codes - so it
+    parses without complaint into a path holding a tab and a formfeed. Left
+    alone that surfaces much later as an unreadable OSError, or worse as
+    files written somewhere nobody thinks to look, so catch it at startup.
+    """
+    val = cfg.get(key)
+    if isinstance(val, str) and re.search(r"[\x00-\x1f]", val):
+        print(f"[CFG] {key} in {CONFIG_FILE} contains a control character:")
+        print(f"[CFG]     {val!r}")
+        print(BACKSLASH_HELP)
+        raise SystemExit(1)
+
+
 def load_config() -> Dict:
     cfg_path = Path(CONFIG_FILE)
     if not cfg_path.exists():
         cfg_path.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
         print(f"[CFG] Created {CONFIG_FILE}.")
         return DEFAULT_CONFIG
-    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    raw = cfg_path.read_text(encoding="utf-8")
+    try:
+        cfg = json.loads(raw)
+    except json.JSONDecodeError as e:
+        cfg = _config_from_bad_json(raw, e)
     # A config written before display settings existed simply has none, so
     # fill them from the defaults rather than making the sysop edit the file.
     for k, v in DEFAULT_CONFIG.items():
@@ -722,6 +773,7 @@ def load_config() -> Dict:
         elif isinstance(v, dict) and isinstance(cfg.get(k), dict):
             for kk, vv in v.items():
                 cfg[k].setdefault(kk, vv)
+    _check_path_setting(cfg, "output_dir")
     return cfg
 
 

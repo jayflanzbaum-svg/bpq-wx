@@ -75,8 +75,14 @@ on the BPQ32 node PC.
    whenever the app is running, which is useful for troubleshooting. Press
    `Ctrl+C` to stop it before continuing.
 6. **Edit `wx_config.json`** (right-click it → Open with → Notepad):
-   - `output_dir` — point at your BBS files folder
-     (e.g. `C:\Users\<you>\AppData\Roaming\BPQ32\BPQMailChat\Files`)
+   - `output_dir` — point at your BBS files folder. **A Windows path needs
+     its backslashes doubled**, because in JSON a single backslash starts an
+     escape code:
+     ```json
+     "output_dir": "C:\\Users\\<you>\\AppData\\Roaming\\BPQ32\\BPQMailChat\\Files"
+     ```
+     Forward slashes work too, and are easier to get right —
+     `"C:/Users/<you>/AppData/Roaming/BPQ32/BPQMailChat/Files"`.
    - `banner` — the station banner printed at the bottom of saved reports
    - `listen_port` — must match the CMDPORT entry you add below (default 63051)
 7. Add the app to `BPQ32.cfg`:
@@ -105,6 +111,21 @@ on the BPQ32 node PC.
    or add it to Windows startup.) Connect to your node and type `WX`.
 
 ## Troubleshooting
+
+- **A wall of red `Traceback` text ending in `json.decoder.JSONDecodeError`** —
+  `wx_config.json` has a typo. The app now prints the offending line with a
+  `^` under the spot instead of a traceback, e.g.:
+  ```
+  [CFG] wx_config.json is not valid JSON: Invalid \escape
+  [CFG] line 10:   "output_dir": "C:\BPQ-WX\files",
+  [CFG]                             ^
+  ```
+  `Invalid \escape` is almost always a Windows path written with single
+  backslashes. Double them (`"C:\\BPQ-WX\\files"`) or use forward slashes
+  (`"C:/BPQ-WX/files"`). Watch for this one even when the file *does* load:
+  `"C:\temp\files"` is legal JSON — `\t` and `\f` are real escape codes — and
+  silently becomes a path with a tab and a formfeed in it. The app checks
+  `output_dir` for that at startup and stops with the same advice.
 
 - **FILE (or GRIB) says it saved, but you can't find the file** — `output_dir`
   in `wx_config.json` almost certainly isn't pointing at your actual BPQ32
