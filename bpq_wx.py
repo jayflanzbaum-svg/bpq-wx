@@ -840,7 +840,22 @@ async def read_line(reader: asyncio.StreamReader, timeout: Optional[float] = Non
         return None
     if not raw:
         return None
-    return raw.decode("utf-8", "ignore").strip()
+    return apply_line_edits(raw.decode("utf-8", "ignore")).strip()
+
+
+def apply_line_edits(s: str) -> str:
+    """Apply backspace / DEL the way a terminal would, then drop other control
+    characters. A phone client that re-flows a word at its wrap column sends
+    'neptune' BS BS 'ne'; kept raw, that read as 'neptunene'. Same helper in
+    every node app (NODE-APP-STYLE.md s5)."""
+    out = []
+    for ch in s:
+        if ch in "\x08\x7f":
+            if out:
+                out.pop()
+        elif ch >= " " or ch == "\t":
+            out.append(ch)
+    return "".join(out)
 
 
 async def get_report_text(ctx: "AppContext", zipcode: str, hours48: bool) -> str:
