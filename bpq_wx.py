@@ -90,12 +90,12 @@ GRIB_LEVELS = {
     "lev_mean_sea_level": "on",
 }
 
-# Grouped one purpose per line, <ENTER> first and HELP | QUIT last, inside 42
+# Grouped one purpose per line, <ENTER> first and the ?/NODE hint last, inside 42
 # columns - see BPQ-Node/NODE-APP-STYLE.md. This was one 89-column line, which
 # folded into four ragged ones on a phone.
 MENU_LINE = ("<ENTER> | ZIP <#####> | 48HR | ALERTS\r\n"
-             "YAPP | FILE | GRIB | YAPP GRIB\r\n"
-             "STATUS | HELP | QUIT\r\n")
+             "YAPP | FILE | GRIB | YAPP GRIB | STATUS\r\n"
+             "[?=Commands, NODE=Back to Node]\r\n")
 
 # Two columns inside 42: a 13-wide command field, then the gloss.
 HELP_TEXT = (
