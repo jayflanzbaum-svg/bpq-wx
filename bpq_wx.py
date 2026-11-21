@@ -350,26 +350,25 @@ def build_report(place: str, state: str, zipcode: str, periods: List[dict], hour
         "",
     ]
 
-    # A fixed 6-column label field, so the four values start in the same
-    # place and a folded one indents under its own label rather than under
-    # the next line's label. See BPQ-Node/NODE-APP-STYLE.md.
+    # "WX:Mostly Clear" - label and value with no gap. Padding the labels
+    # into a column only lines up in a fixed-width font; the mesh apps use
+    # proportional ones, and the gap cost airtime. See NODE-APP-STYLE.md.
     def block(title: str, s: dict) -> List[str]:
-        # Folded here rather than in send(), because a value that runs long
-        # must hang under the value column. Left to the generic fold it came
-        # back at the label's own indent and read as another label row.
+        # Folded here rather than in send(), so a value that runs long hangs
+        # deeper than the labels and does not read as another label row.
         out = [title]
         for label in ("WX", "TEMP", "WIND", "RAIN"):
-            out += textwrap.wrap(f"{label:<6}{s[label.lower()]}",
+            out += textwrap.wrap(f"{label}:{s[label.lower()]}",
                                  width=max(24, OUT_WIDTH),
                                  initial_indent="  ",
-                                 subsequent_indent=" " * 8,
+                                 subsequent_indent=" " * 4,
                                  break_long_words=True,
                                  break_on_hyphens=False)
         return out
 
-    lines += block("0-24 HOURS", summarize_period_block(periods[:24]))
+    lines += block("Next 24 Hrs", summarize_period_block(periods[:24]))
     if hours48:
-        lines += [""] + block("24-48 HOURS", summarize_period_block(periods[24:48]))
+        lines += [""] + block("Next 24-48 Hrs", summarize_period_block(periods[24:48]))
 
     return "\n".join(lines) + "\n"
 

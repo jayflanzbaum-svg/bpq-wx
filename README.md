@@ -11,11 +11,11 @@ the session via YAPP**, or from your BBS Files area.
 WX REPORT  Newington CT 06111
 Issued: 08-09-2026 09:20 PM  Source: NWS Hourly
 
-0-24 HOURS
-WX: Mostly Clear; Mostly Sunny; Sunny
-TEMP: 68-84 F
-WIND: NW 6-10 mph
-RAIN: Little or no rain expected.
+Next 24 Hrs
+  WX:Mostly Clear; Mostly Sunny; Sunny
+  TEMP:68-84 F
+  WIND:NW 6-10 mph
+  RAIN:Little or no rain expected.
 
 <ENTER> | ZIP <#####> | 48HR | ALERTS | DL | GRIB | DL GRIB | FILE | STATUS | HELP | QUIT
 ```
